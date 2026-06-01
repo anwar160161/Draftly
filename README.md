@@ -138,7 +138,7 @@ The system enforces a two-step: approve first, then send. Calling `/drafts/{id}/
 When tone is set to `auto`, the system fetches the user's last few sent emails and includes them in the Claude prompt. Claude reads those samples and mirrors the user's natural writing style — their greeting style, sentence length, level of formality, how they sign off. No explicit configuration needed.
 
 ### 3. Encrypted token storage
-Gmail OAuth tokens are sensitive. Before saving them to the database, they go through Fernet symmetric encryption. In development, the key is derived from SECRET_KEY. In production, you should set a proper TOKEN_ENCRYPTION_KEY (a real 32-byte Fernet key).
+Gmail OAuth tokens are sensitive. Before saving them to the database, they go through Fernet symmetric encryption. In development, the key is derived from SECRET_KEY.
 
 ### 4. JWT sessions
 After OAuth login, the server issues a short-lived JWT (24 hours). All subsequent API calls carry this token in the Authorization header. The backend stays stateless — no server-side sessions, no cookies. This makes it easy to scale horizontally.
