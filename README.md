@@ -118,7 +118,7 @@ Four tables:
 
 **drafts** — The core table. Stores the source email metadata, the AI-generated body, the user's edited version (if any), current status, send attempts, and timestamps. Every state change is captured here.
 
-**activity_logs** — An append-only audit trail. Every meaningful event (draft created, approved, sent, failed) gets a log entry. Useful for debugging and for the explainer video demo.
+**activity_logs** — An append-only audit trail. Every meaningful event (draft created, approved, sent, failed) gets a log entry. Useful for debugging.
 
 Draft status flow:
 ```
