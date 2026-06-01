@@ -402,7 +402,6 @@ PATCH /preferences
 ## What Could Be Better (Future Work)
 
 - **Token auto-refresh** — Currently the Gmail access token expires after 1 hour and the user has to log in again. The refresh token is stored and could be used to silently renew access.
-- **Background processing** — Draft generation is currently synchronous. For production it should be handed off to a worker (Celery or ARQ) so the API responds immediately with a job ID.
 - **Gmail Push Notifications** — Instead of manually fetching emails, Gmail's Pub/Sub push can notify the backend when new mail arrives and auto-generate drafts.
 - **Multiple AI providers** — The ai_service can be abstracted behind an interface to swap between Claude, Gemini, or OpenAI without changing any other code.
 - **Rate limiting** — Add per-user request limits to stay within Gmail API quotas.
