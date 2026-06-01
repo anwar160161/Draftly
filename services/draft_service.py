@@ -134,6 +134,8 @@ def create_draft(db: Session, user: User, req: GenerateDraftRequest) -> Draft:
         source_subject=email.get("subject"),
         source_from=email.get("sender"),
         source_snippet=email.get("snippet"),
+        source_references=email.get("references"),
+        source_rfc_message_id=email.get("rfc_message_id"),
         draft_body=draft_body,
         tone_used=tone_used,
         status=DraftStatus.PENDING,
@@ -303,7 +305,8 @@ def send_draft(db: Session, user: User, draft_id: str) -> Draft:
             to=draft.source_from or "",
             subject=draft.source_subject or "",
             body=body_to_send,
-            in_reply_to=draft.source_message_id,
+            in_reply_to=draft.source_rfc_message_id or draft.source_message_id,  # ← correct
+            references=draft.source_references,
         )
 
     try:

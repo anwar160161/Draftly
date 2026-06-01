@@ -243,6 +243,21 @@ class Draft(Base):
     )
     """Short preview of the source email."""
 
+    source_references = Column(
+        String,
+        nullable=True,
+    )
+    """Email References header from the source email for proper threading."""
+
+    source_rfc_message_id = Column(
+    String,
+    nullable=True,
+    )
+    """RFC 2822 Message-ID header from the source email (e.g. <CABc123@mail.gmail.com>).
+    Used in the In-Reply-To header when sending replies to ensure proper threading
+    on the recipient's email client. Different from source_message_id which is
+    Gmail's internal ID."""
+
     # ------------------------------------------------------------------------
     # AI Generated Draft
     # ------------------------------------------------------------------------

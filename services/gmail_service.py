@@ -23,6 +23,7 @@ import requests as req
 from auth.oauth import decrypt_token
 from config import get_settings
 from models import User
+import re
 
 settings = get_settings()
 
@@ -83,6 +84,29 @@ def _decode_body(payload: dict) -> str:
 
     return ""
 
+def _extract_last_message_id(references: str) -> str | None:
+    """
+    Extract the last Message-ID from a References header string.
+
+    Used as a fallback when the Message-ID header is missing from
+    the email — which happens with some email clients and servers.
+
+    The References header looks like:
+        19e7e040b18756cf <CAMLcut...@mail.gmail.com>
+
+    We want the last angle-bracketed value since that's the most
+    recent message in the thread.
+
+    Args:
+        references (str): Raw References header value.
+
+    Returns:
+        str | None: Last message ID found, or None if not found.
+    """
+    if not references:
+        return None
+    matches = re.findall(r'<[^>]+>', references)
+    return matches[-1] if matches else None
 
 def _parse_message(msg: dict) -> dict:
     """
@@ -90,6 +114,10 @@ def _parse_message(msg: dict) -> dict:
 
     Extracts commonly used email metadata including subject,
     sender, date, body, and snippet.
+
+    The rfc_message_id is the standard email Message-ID header
+    (looks like <CABc123@mail.gmail.com>) — this is what email
+    clients use for threading, not Gmail's internal message ID.
 
     Args:
         msg (dict): Raw Gmail message.
@@ -103,15 +131,16 @@ def _parse_message(msg: dict) -> dict:
     }
 
     return {
-        "message_id": msg["id"],
-        "thread_id": msg["threadId"],
-        "subject": headers.get("subject"),
-        "sender": headers.get("from"),
-        "date": headers.get("date"),
-        "snippet": msg.get("snippet", ""),
-        "body": _decode_body(msg["payload"]),
-    }
-
+            "message_id":     msg["id"],
+            "thread_id":      msg["threadId"],
+            "subject":        headers.get("subject"),
+            "sender":         headers.get("from"),
+            "date":           headers.get("date"),
+            "snippet":        msg.get("snippet", ""),
+            "body":           _decode_body(msg["payload"]),
+            "rfc_message_id": headers.get("message-id") or _extract_last_message_id(headers.get("references", "")),
+            "references":     headers.get("references"),
+        }
 
 # ============================================================================
 # Public Gmail API Functions
@@ -250,6 +279,7 @@ def send_reply(
     subject: str,
     body: str,
     in_reply_to: Optional[str] = None,
+    references: Optional[str] = None,
 ) -> str:
     """
     Send a reply within an existing Gmail conversation thread.
@@ -264,6 +294,7 @@ def send_reply(
         subject (str): Original email subject.
         body (str): Reply content.
         in_reply_to (str, optional): Original message ID.
+        references (str, optional): Full reference chain from original email.
 
     Returns:
         str: Gmail ID of the sent message.
@@ -282,8 +313,22 @@ def send_reply(
     )
 
     if in_reply_to:
-        mime["In-Reply-To"] = in_reply_to
-        mime["References"] = in_reply_to
+        # RFC 5322 requires message IDs to be wrapped in angle brackets
+        formatted_in_reply_to = f"<{in_reply_to}>" if not in_reply_to.startswith("<") else in_reply_to
+        mime["In-Reply-To"] = formatted_in_reply_to
+        
+        # Construct References header with full chain
+        if references:
+            # Format all message IDs with angle brackets
+            formatted_refs = " ".join(
+                f"<{ref}>" if not ref.startswith("<") else ref
+                for ref in references.split()
+            )
+            # Append the in_reply_to message ID to the existing reference chain
+            mime["References"] = f"{formatted_refs} {formatted_in_reply_to}"
+        else:
+            # If no existing references, just use the in_reply_to
+            mime["References"] = formatted_in_reply_to
 
     raw = base64.urlsafe_b64encode(
         mime.as_bytes()

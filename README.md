@@ -6,6 +6,24 @@ Built with FastAPI, SQLAlchemy, Google Gmail API, and Anthropic Claude.
 
 ---
 
+## Table of Contents
+
+1. [Why I Built It This Way](#why-i-built-it-this-way)
+2. [How It Works](#how-it-works)
+3. [System Architecture](#system-architecture)
+4. [Project Structure](#project-structure)
+5. [Database Design](#database-design)
+6. [Key Design Decisions](#key-design-decisions)
+7. [Setup and Installation](#setup-and-installation)
+8. [Running with Docker](#running-with-docker)
+9. [Environment Variables](#environment-variables)
+10. [API Reference](#api-reference)
+11. [Testing the Full Flow](#testing-the-full-flow)
+12. [Security Considerations](#security-considerations)
+13. [What Could Be Better](#what-could-be-better-future-work)
+
+---
+
 ## Why I Built It This Way
 
 The core idea was simple: professionals waste a lot of time writing the same kinds of replies — meeting confirmations, acknowledgements, follow-ups. Automating the *drafting* part while keeping the human in the loop for *sending* felt like the right balance.
@@ -71,8 +89,6 @@ The architecture follows a clean separation:
 - **Models** are pure database definitions, no logic in them
 - **Schemas** are pure data shapes for API input/output
 
-This makes the code easy to test, easy to extend, and easy to reason about.
-
 ---
 
 ## Project Structure
@@ -84,6 +100,8 @@ draftly/
 ├── database.py              # SQLAlchemy engine and session management
 ├── models.py                # Database models: User, Draft, UserPreference, ActivityLog
 ├── schemas.py               # Pydantic DTOs for all API inputs and outputs
+├── Dockerfile               # Docker container definition
+├── docker-compose.yml       # Docker Compose configuration
 │
 ├── auth/
 │   ├── oauth.py             # Google OAuth2 flow, token exchange, Fernet encryption
@@ -118,7 +136,7 @@ Four tables:
 
 **drafts** — The core table. Stores the source email metadata, the AI-generated body, the user's edited version (if any), current status, send attempts, and timestamps. Every state change is captured here.
 
-**activity_logs** — An append-only audit trail. Every meaningful event (draft created, approved, sent, failed) gets a log entry. Useful for debugging and for the explainer video demo.
+**activity_logs** — An append-only audit trail. Every meaningful event (draft created, approved, sent, failed) gets a log entry. Useful for debugging and monitoring.
 
 Draft status flow:
 ```
@@ -138,28 +156,31 @@ The system enforces a two-step: approve first, then send. Calling `/drafts/{id}/
 When tone is set to `auto`, the system fetches the user's last few sent emails and includes them in the Claude prompt. Claude reads those samples and mirrors the user's natural writing style — their greeting style, sentence length, level of formality, how they sign off. No explicit configuration needed.
 
 ### 3. Encrypted token storage
-Gmail OAuth tokens are sensitive. Before saving them to the database, they go through Fernet symmetric encryption. In development, the key is derived from SECRET_KEY. In production, you should set a proper TOKEN_ENCRYPTION_KEY (a real 32-byte Fernet key).
+Gmail OAuth tokens are sensitive. Before saving them to the database, they go through Fernet symmetric encryption. In development, the key is derived from SECRET_KEY. In production, set a proper TOKEN_ENCRYPTION_KEY (a real 32-byte Fernet key).
 
 ### 4. JWT sessions
-After OAuth login, the server issues a short-lived JWT (24 hours). All subsequent API calls carry this token in the Authorization header. The backend stays stateless — no server-side sessions, no cookies. This makes it easy to scale horizontally.
+After OAuth login, the server issues a short-lived JWT (24 hours). All subsequent API calls carry this token in the Authorization header. The backend stays stateless — no server-side sessions, no cookies.
 
 ### 5. Retry logic on send
 Sending emails can fail transiently — rate limits, network blips, temporary Gmail errors. The send function uses `tenacity` to retry up to 3 times with a 2-second wait between attempts. The attempt count and last error are both saved to the draft record so you can audit failures.
 
-### 6. One database URL to rule them all
-The project uses SQLite by default. Switching to PostgreSQL for production is a single line change in `.env`. No code changes, no migration rewrites. SQLAlchemy handles the abstraction.
+### 6. Failure notifications
+If all retries are exhausted, the system sends an alert email to the user via Gmail so they know something went wrong and can take action manually.
 
-### 7. Direct HTTP calls to Gmail API
-The `google-api-python-client` library had connection issues on Windows (WinError 10060). Rather than fighting the library, I replaced Gmail API calls with direct `requests` HTTP calls to the Gmail REST endpoints. Same functionality, much more reliable, easier to debug.
+### 7. Proper email threading (Gmail + Outlook)
+Replies use `In-Reply-To`, `References`, `Thread-Topic`, and `Thread-Index` headers to ensure replies appear in the correct thread on both Gmail and Outlook clients.
+
+### 8. One database URL to rule them all
+The project uses SQLite by default. Switching to PostgreSQL for production is a single line change in `.env`. No code changes needed.
 
 ---
 
 ## Setup and Installation
 
 ### What you need
-- Python 3.11 or higher
+- Python 3.11 or higher (or Docker)
 - A Google Cloud project with Gmail API enabled
-- An Anthropic API key (or Gemini)
+- An Anthropic API key
 
 ### Step 1 — Google Cloud setup
 1. Go to https://console.cloud.google.com
@@ -181,14 +202,7 @@ pip install -r requirements.txt
 ### Step 3 — Configure
 ```bash
 cp .env.example .env
-```
-
-Edit `.env` and fill in:
-```
-SECRET_KEY=<generate with: python -c "import secrets; print(secrets.token_hex(32))">
-GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=your-client-secret
-ANTHROPIC_API_KEY=sk-ant-...
+# Edit .env and fill in the required values
 ```
 
 ### Step 4 — Run
@@ -200,11 +214,53 @@ Open http://localhost:8000/docs
 
 ---
 
+## Running with Docker
+
+### Option A — Docker Compose (recommended)
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/your-username/draftly.git
+cd draftly
+
+# 2. Set up environment
+cp .env.example .env
+# Edit .env and fill in your keys
+
+# 3. Build and start
+docker-compose up --build
+
+# 4. Open Swagger UI
+# http://localhost:8000/docs
+```
+
+To stop:
+```bash
+docker-compose down
+```
+
+### Option B — Docker directly
+
+```bash
+# Build the image
+docker build -t draftly .
+
+# Run the container
+docker run -p 8000:8000 --env-file .env draftly
+```
+
+### Notes on Docker
+- The SQLite database is mounted as a volume in `docker-compose.yml` so data persists between container restarts
+- For production, replace SQLite with PostgreSQL by updating `DATABASE_URL` in `.env`
+- The container runs on port 8000 by default
+
+---
+
 ## Environment Variables
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `SECRET_KEY` | ✅ | — | JWT signing key — generate a long random string |
+| `SECRET_KEY` | ✅ | — | JWT signing key — generate with `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `DATABASE_URL` | — | sqlite:///./draftly.db | Swap for PostgreSQL in production |
 | `GOOGLE_CLIENT_ID` | ✅ | — | From Google Cloud Console |
 | `GOOGLE_CLIENT_SECRET` | ✅ | — | From Google Cloud Console |
@@ -285,7 +341,7 @@ POST /drafts/{id}/approve
 Draft status progression:
 ```
 pending → approved → sent
-pending → edited   → sent  
+pending → edited   → sent
 pending → rejected
 ```
 
@@ -319,7 +375,7 @@ PATCH /preferences
 
 ## Testing the Full Flow
 
-1. Start server: `uvicorn main:app --reload`
+1. Start server: `uvicorn main:app --reload` (or `docker-compose up`)
 2. Open http://localhost:8000/docs
 3. `GET /auth/login` → copy the URL → open in browser → sign in
 4. Copy the JWT from the callback response
@@ -346,7 +402,7 @@ PATCH /preferences
 ## What Could Be Better (Future Work)
 
 - **Token auto-refresh** — Currently the Gmail access token expires after 1 hour and the user has to log in again. The refresh token is stored and could be used to silently renew access.
-- **Background processing** — Right now draft generation is synchronous. For production, it should be handed off to a worker (Celery or ARQ) so the API responds immediately with a job ID.
-- **Gmail Push Notifications** — Instead of the user manually fetching emails, Gmail's Pub/Sub push can notify the backend when new mail arrives and auto-generate drafts.
-- **Multiple AI providers** — The ai_service can be abstracted behind an interface so you can swap between Claude, Gemini, or OpenAI without changing any other code.
+- **Background processing** — Draft generation is currently synchronous. For production it should be handed off to a worker (Celery or ARQ) so the API responds immediately with a job ID.
+- **Gmail Push Notifications** — Instead of manually fetching emails, Gmail's Pub/Sub push can notify the backend when new mail arrives and auto-generate drafts.
+- **Multiple AI providers** — The ai_service can be abstracted behind an interface to swap between Claude, Gemini, or OpenAI without changing any other code.
 - **Rate limiting** — Add per-user request limits to stay within Gmail API quotas.
